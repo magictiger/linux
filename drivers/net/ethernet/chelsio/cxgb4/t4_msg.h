@@ -56,6 +56,7 @@ enum {
 	CPL_TX_DATA_ISO	      = 0x1F,
 
 	CPL_CLOSE_LISTSRV_RPL = 0x20,
+	CPL_GET_TCB_RPL       = 0x22,
 	CPL_L2T_WRITE_RPL     = 0x23,
 	CPL_PASS_OPEN_RPL     = 0x24,
 	CPL_ACT_OPEN_RPL      = 0x25,
@@ -687,6 +688,13 @@ struct cpl_get_tcb {
 #define NO_REPLY_S    15
 #define NO_REPLY_V(x) ((x) << NO_REPLY_S)
 #define NO_REPLY_F    NO_REPLY_V(1U)
+
+struct cpl_get_tcb_rpl {
+	union opcode_tid ot;
+	__u8 cookie;
+	__u8 status;
+	__be16 len;
+};
 
 struct cpl_set_tcb_field {
 	WR_HDR;
@@ -1412,6 +1420,11 @@ enum {
 	CPL_FW4_ACK_FLAGS_CH		= 0x2,	/* channel change complete */
 	CPL_FW4_ACK_FLAGS_FLOWC		= 0x4,	/* fw_flowc_wr complete */
 };
+
+#define CPL_FW4_ACK_FLOWID_S    0
+#define CPL_FW4_ACK_FLOWID_M    0xffffff
+#define CPL_FW4_ACK_FLOWID_G(x) \
+	(((x) >> CPL_FW4_ACK_FLOWID_S) & CPL_FW4_ACK_FLOWID_M)
 
 struct cpl_fw6_msg {
 	u8 opcode;

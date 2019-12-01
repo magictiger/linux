@@ -193,6 +193,7 @@ struct fsl_mc_device {
 	struct resource *regions;
 	struct fsl_mc_device_irq **irqs;
 	struct fsl_mc_resource *resource;
+	struct device_link *consumer_link;
 };
 
 #define to_fsl_mc_device(_dev) \
@@ -401,6 +402,8 @@ struct irq_domain *fsl_mc_msi_create_irq_domain(struct fwnode_handle *fwnode,
 int __must_check fsl_mc_allocate_irqs(struct fsl_mc_device *mc_dev);
 
 void fsl_mc_free_irqs(struct fsl_mc_device *mc_dev);
+
+struct fsl_mc_device *fsl_mc_get_endpoint(struct fsl_mc_device *mc_dev);
 
 extern struct bus_type fsl_mc_bus_type;
 

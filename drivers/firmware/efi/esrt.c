@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * esrt.c
  *
@@ -244,6 +245,9 @@ void __init efi_esrt_init(void)
 	efi_memory_desc_t md;
 	int rc;
 	phys_addr_t end;
+
+	if (!efi_enabled(EFI_MEMMAP))
+		return;
 
 	pr_debug("esrt-init: loading.\n");
 	if (!esrt_table_exists())

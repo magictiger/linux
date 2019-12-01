@@ -1,16 +1,13 @@
+/* SPDX-License-Identifier: GPL-2.0-only */
 /*
  * Atmel MACB Ethernet Controller driver
  *
  * Copyright (C) 2004-2006 Atmel Corporation
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License version 2 as
- * published by the Free Software Foundation.
  */
 #ifndef _MACB_H
 #define _MACB_H
 
-#include <linux/phy.h>
+#include <linux/phylink.h>
 #include <linux/ptp_clock_kernel.h>
 #include <linux/net_tstamp.h>
 #include <linux/interrupt.h>
@@ -499,7 +496,11 @@
 
 /* Bitfields in TISUBN */
 #define GEM_SUBNSINCR_OFFSET			0
-#define GEM_SUBNSINCR_SIZE			16
+#define GEM_SUBNSINCRL_OFFSET			24
+#define GEM_SUBNSINCRL_SIZE			8
+#define GEM_SUBNSINCRH_OFFSET			0
+#define GEM_SUBNSINCRH_SIZE			16
+#define GEM_SUBNSINCR_SIZE			24
 
 /* Bitfields in TI */
 #define GEM_NSINCR_OFFSET			0
@@ -715,6 +716,8 @@
 		__v; \
 	})
 
+#define MACB_READ_NSR(bp)	macb_readl(bp, NSR)
+
 /* struct macb_dma_desc - Hardware DMA descriptor
  * @addr: DMA address of data buffer
  * @ctrl: Control and status bits
@@ -834,6 +837,9 @@ struct gem_tx_ts {
 
 /* limit RX checksum offload to TCP and UDP packets */
 #define GEM_RX_CSUM_CHECKED_MASK		2
+
+/* Scaled PPM fraction */
+#define PPM_FRACTION	16
 
 /* struct macb_tx_skb - data about an skb which is being transmitted
  * @skb: skb currently being transmitted, only set for the last buffer
@@ -1061,7 +1067,8 @@ struct macb_or_gem_ops {
 	int	(*mog_alloc_rx_buffers)(struct macb *bp);
 	void	(*mog_free_rx_buffers)(struct macb *bp);
 	void	(*mog_init_rings)(struct macb *bp);
-	int	(*mog_rx)(struct macb_queue *queue, int budget);
+	int	(*mog_rx)(struct macb_queue *queue, struct napi_struct *napi,
+			  int budget);
 };
 
 /* MACB-PTP interface: adapt to platform needs. */
@@ -1078,12 +1085,17 @@ struct macb_ptp_info {
 			 struct ifreq *ifr, int cmd);
 };
 
+struct macb_pm_data {
+	u32 scrt2;
+	u32 usrio;
+};
+
 struct macb_config {
 	u32			caps;
 	unsigned int		dma_burst_length;
 	int	(*clk_init)(struct platform_device *pdev, struct clk **pclk,
 			    struct clk **hclk, struct clk **tx_clk,
-			    struct clk **rx_clk);
+			    struct clk **rx_clk, struct clk **tsu_clk);
 	int	(*init)(struct platform_device *pdev);
 	int	jumbo_max_len;
 };
@@ -1163,6 +1175,7 @@ struct macb {
 	struct clk		*hclk;
 	struct clk		*tx_clk;
 	struct clk		*rx_clk;
+	struct clk		*tsu_clk;
 	struct net_device	*dev;
 	union {
 		struct macb_stats	macb;
@@ -1172,15 +1185,14 @@ struct macb {
 	struct macb_or_gem_ops	macbgem_ops;
 
 	struct mii_bus		*mii_bus;
-	struct device_node	*phy_node;
-	int 			link;
-	int 			speed;
-	int 			duplex;
+	struct phylink		*phylink;
+	struct phylink_config	phylink_config;
 
 	u32			caps;
 	unsigned int		dma_burst_length;
 
 	phy_interface_t		phy_interface;
+	int			speed;
 
 	/* AT91RM9200 transmit */
 	struct sk_buff *skb;			/* holds skb until xmit interrupt completes */
@@ -1217,6 +1229,8 @@ struct macb {
 	int	tx_bd_rd_prefetch;
 
 	u32	rx_intr_mask;
+
+	struct macb_pm_data pm_data;
 };
 
 #ifdef CONFIG_MACB_USE_HWSTAMP

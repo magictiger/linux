@@ -1,23 +1,10 @@
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Module-based torture test facility for locking
  *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation; either version 2 of the License, or
- * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, you can access it online at
- * http://www.gnu.org/licenses/gpl-2.0.html.
- *
  * Copyright (C) IBM Corporation, 2014
  *
- * Authors: Paul E. McKenney <paulmck@us.ibm.com>
+ * Authors: Paul E. McKenney <paulmck@linux.ibm.com>
  *          Davidlohr Bueso <dave@stgolabs.net>
  *	Based on kernel/rcu/torture.c.
  */
@@ -29,7 +16,6 @@
 #include <linux/kthread.h>
 #include <linux/sched/rt.h>
 #include <linux/spinlock.h>
-#include <linux/rwlock.h>
 #include <linux/mutex.h>
 #include <linux/rwsem.h>
 #include <linux/smp.h>
@@ -45,7 +31,7 @@
 #include <linux/torture.h>
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Paul E. McKenney <paulmck@us.ibm.com>");
+MODULE_AUTHOR("Paul E. McKenney <paulmck@linux.ibm.com>");
 
 torture_param(int, nwriters_stress, -1,
 	     "Number of write-locking stress-test threads");
@@ -842,7 +828,9 @@ static void lock_torture_cleanup(void)
 						"End of test: SUCCESS");
 
 	kfree(cxt.lwsa);
+	cxt.lwsa = NULL;
 	kfree(cxt.lrsa);
+	cxt.lrsa = NULL;
 
 end:
 	torture_cleanup_end();
@@ -900,16 +888,16 @@ static int __init lock_torture_init(void)
 		cxt.nrealwriters_stress = 2 * num_online_cpus();
 
 #ifdef CONFIG_DEBUG_MUTEXES
-	if (strncmp(torture_type, "mutex", 5) == 0)
+	if (str_has_prefix(torture_type, "mutex"))
 		cxt.debug_lock = true;
 #endif
 #ifdef CONFIG_DEBUG_RT_MUTEXES
-	if (strncmp(torture_type, "rtmutex", 7) == 0)
+	if (str_has_prefix(torture_type, "rtmutex"))
 		cxt.debug_lock = true;
 #endif
 #ifdef CONFIG_DEBUG_SPINLOCK
-	if ((strncmp(torture_type, "spin", 4) == 0) ||
-	    (strncmp(torture_type, "rw_lock", 7) == 0))
+	if ((str_has_prefix(torture_type, "spin")) ||
+	    (str_has_prefix(torture_type, "rw_lock")))
 		cxt.debug_lock = true;
 #endif
 
@@ -970,7 +958,7 @@ static int __init lock_torture_init(void)
 	/* Prepare torture context. */
 	if (onoff_interval > 0) {
 		firsterr = torture_onoff_init(onoff_holdoff * HZ,
-					      onoff_interval * HZ);
+					      onoff_interval * HZ, NULL);
 		if (firsterr)
 			goto unwind;
 	}
@@ -986,7 +974,7 @@ static int __init lock_torture_init(void)
 			goto unwind;
 	}
 	if (stutter > 0) {
-		firsterr = torture_stutter_init(stutter);
+		firsterr = torture_stutter_init(stutter, stutter);
 		if (firsterr)
 			goto unwind;
 	}

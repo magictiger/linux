@@ -165,7 +165,7 @@ of appropriately sized buffers for each use case).
 struct v4l2_buffer
 ==================
 
-.. tabularcolumns:: |p{2.8cm}|p{2.5cm}|p{1.3cm}|p{10.5cm}|
+.. tabularcolumns:: |p{2.8cm}|p{2.5cm}|p{1.6cm}|p{10.2cm}|
 
 .. cssclass:: longtable
 
@@ -230,8 +230,7 @@ struct v4l2_buffer
     * - struct :c:type:`v4l2_timecode`
       - ``timecode``
       -
-      - When ``type`` is ``V4L2_BUF_TYPE_VIDEO_CAPTURE`` and the
-	``V4L2_BUF_FLAG_TIMECODE`` flag is set in ``flags``, this
+      - When the ``V4L2_BUF_FLAG_TIMECODE`` flag is set in ``flags``, this
 	structure contains a frame timecode. In
 	:c:type:`V4L2_FIELD_ALTERNATE <v4l2_field>` mode the top and
 	bottom field contain the same timecode. Timecodes are intended to
@@ -327,7 +326,7 @@ struct v4l2_buffer
 	Applications should not set ``V4L2_BUF_FLAG_REQUEST_FD`` for any ioctls
 	other than :ref:`VIDIOC_QBUF <VIDIOC_QBUF>`.
 
-	If the device does not support requests, then ``EACCES`` will be returned.
+	If the device does not support requests, then ``EBADR`` will be returned.
 	If requests are supported but an invalid request file descriptor is
 	given, then ``EINVAL`` will be returned.
 
@@ -421,7 +420,7 @@ enum v4l2_buf_type
 
 .. cssclass:: longtable
 
-.. tabularcolumns:: |p{7.2cm}|p{0.6cm}|p{9.7cm}|
+.. tabularcolumns:: |p{7.8cm}|p{0.6cm}|p{9.1cm}|
 
 .. flat-table::
     :header-rows:  0
@@ -483,7 +482,11 @@ enum v4l2_buf_type
 Buffer Flags
 ============
 
-.. tabularcolumns:: |p{7.0cm}|p{2.2cm}|p{8.3cm}|
+.. raw:: latex
+
+    \small
+
+.. tabularcolumns:: |p{7.0cm}|p{2.1cm}|p{8.4cm}|
 
 .. cssclass:: longtable
 
@@ -604,6 +607,19 @@ Buffer Flags
 	applications shall use this flag for output buffers if the data in
 	this buffer has not been created by the CPU but by some
 	DMA-capable unit, in which case caches have not been used.
+    * .. _`V4L2-BUF-FLAG-M2M-HOLD-CAPTURE-BUF`:
+
+      - ``V4L2_BUF_FLAG_M2M_HOLD_CAPTURE_BUF``
+      - 0x00000200
+      - Only valid if ``V4L2_BUF_CAP_SUPPORTS_M2M_HOLD_CAPTURE_BUF`` is
+	set. It is typically used with stateless decoders where multiple
+	output buffers each decode to a slice of the decoded frame.
+	Applications can set this flag when queueing the output buffer
+	to prevent the driver from dequeueing the capture buffer after
+	the output buffer has been decoded (i.e. the capture buffer is
+	'held'). If the timestamp of this output buffer differs from that
+	of the previous output buffer, then that indicates the start of a
+	new frame and the previously held capture buffer is dequeued.
     * .. _`V4L2-BUF-FLAG-LAST`:
 
       - ``V4L2_BUF_FLAG_LAST``
@@ -682,6 +698,9 @@ Buffer Flags
 	exposure of the frame has begun. This is only valid for the
 	``V4L2_BUF_TYPE_VIDEO_CAPTURE`` buffer type.
 
+.. raw:: latex
+
+    \normalsize
 
 
 .. c:type:: v4l2_memory
@@ -689,7 +708,7 @@ Buffer Flags
 enum v4l2_memory
 ================
 
-.. tabularcolumns:: |p{6.6cm}|p{2.2cm}|p{8.7cm}|
+.. tabularcolumns:: |p{5.0cm}|p{0.8cm}|p{11.7cm}|
 
 .. flat-table::
     :header-rows:  0
@@ -714,10 +733,10 @@ enum v4l2_memory
 Timecodes
 =========
 
-The struct :c:type:`v4l2_timecode` structure is designed to hold a
-:ref:`smpte12m` or similar timecode. (struct
-struct :c:type:`timeval` timestamps are stored in struct
-:c:type:`v4l2_buffer` field ``timestamp``.)
+The :c:type:`v4l2_buffer_timecode` structure is designed to hold a
+:ref:`smpte12m` or similar timecode.
+(struct :c:type:`timeval` timestamps are stored in the struct
+:c:type:`v4l2_buffer` ``timestamp`` field.)
 
 
 .. c:type:: v4l2_timecode
@@ -725,7 +744,7 @@ struct :c:type:`timeval` timestamps are stored in struct
 struct v4l2_timecode
 --------------------
 
-.. tabularcolumns:: |p{4.4cm}|p{4.4cm}|p{8.7cm}|
+.. tabularcolumns:: |p{1.4cm}|p{2.8cm}|p{12.3cm}|
 
 .. flat-table::
     :header-rows:  0
@@ -762,7 +781,7 @@ struct v4l2_timecode
 Timecode Types
 --------------
 
-.. tabularcolumns:: |p{6.6cm}|p{2.2cm}|p{8.7cm}|
+.. tabularcolumns:: |p{5.6cm}|p{0.8cm}|p{11.1cm}|
 
 .. flat-table::
     :header-rows:  0

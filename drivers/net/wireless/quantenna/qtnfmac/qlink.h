@@ -1,25 +1,12 @@
-/*
- * Copyright (c) 2015-2016 Quantenna Communications, Inc.
- * All rights reserved.
- *
- * This program is free software; you can redistribute it and/or
- * modify it under the terms of the GNU General Public License
- * as published by the Free Software Foundation; either version 2
- * of the License, or (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- */
+/* SPDX-License-Identifier: GPL-2.0+ */
+/* Copyright (c) 2015-2016 Quantenna Communications. All rights reserved. */
 
 #ifndef _QTN_QLINK_H_
 #define _QTN_QLINK_H_
 
 #include <linux/ieee80211.h>
 
-#define QLINK_PROTO_VER		11
+#define QLINK_PROTO_VER		15
 
 #define QLINK_MACID_RSVD		0xFF
 #define QLINK_VIFID_RSVD		0xFF
@@ -72,6 +59,7 @@ struct qlink_msg_header {
  * @QLINK_HW_CAPAB_SCAN_RANDOM_MAC_ADDR: device supports MAC Address
  *	Randomization in probe requests.
  * @QLINK_HW_CAPAB_OBSS_SCAN: device can perform OBSS scanning.
+ * @QLINK_HW_CAPAB_HW_BRIDGE: device has hardware switch capabilities.
  */
 enum qlink_hw_capab {
 	QLINK_HW_CAPAB_REG_UPDATE		= BIT(0),
@@ -81,6 +69,8 @@ enum qlink_hw_capab {
 	QLINK_HW_CAPAB_PWR_MGMT			= BIT(4),
 	QLINK_HW_CAPAB_OBSS_SCAN		= BIT(5),
 	QLINK_HW_CAPAB_SCAN_DWELL		= BIT(6),
+	QLINK_HW_CAPAB_SAE			= BIT(8),
+	QLINK_HW_CAPAB_HW_BRIDGE		= BIT(9),
 };
 
 enum qlink_iface_type {
@@ -105,7 +95,8 @@ struct qlink_intf_info {
 	__le16 if_type;
 	__le16 vlanid;
 	u8 mac_addr[ETH_ALEN];
-	u8 rsvd[2];
+	u8 use4addr;
+	u8 rsvd[1];
 } __packed;
 
 enum qlink_sta_flags {
@@ -217,6 +208,8 @@ struct qlink_sta_info_state {
  * execution status (one of &enum qlink_cmd_result). Reply message
  * may also contain data payload specific to the command type.
  *
+ * @QLINK_CMD_SEND_FRAME: send specified frame over the air; firmware will
+ *	encapsulate 802.3 packet into 802.11 frame automatically.
  * @QLINK_CMD_BAND_INFO_GET: for the specified MAC and specified band, get
  *	the band's description including number of operational channels and
  *	info on each channel, HT/VHT capabilities, supported rates etc.
@@ -226,12 +219,16 @@ struct qlink_sta_info_state {
  *	command is supported only if device reports QLINK_HW_SUPPORTS_REG_UPDATE
  *	capability.
  * @QLINK_CMD_START_CAC: start radar detection procedure on a specified channel.
+ * @QLINK_CMD_TXPWR: get or set current channel transmit power for
+ *	the specified MAC.
+ * @QLINK_CMD_NDEV_EVENT: signalizes changes made with a corresponding network
+ *	device.
  */
 enum qlink_cmd_type {
 	QLINK_CMD_FW_INIT		= 0x0001,
 	QLINK_CMD_FW_DEINIT		= 0x0002,
 	QLINK_CMD_REGISTER_MGMT		= 0x0003,
-	QLINK_CMD_SEND_MGMT_FRAME	= 0x0004,
+	QLINK_CMD_SEND_FRAME		= 0x0004,
 	QLINK_CMD_MGMT_SET_APPIE	= 0x0005,
 	QLINK_CMD_PHY_PARAMS_GET	= 0x0011,
 	QLINK_CMD_PHY_PARAMS_SET	= 0x0012,
@@ -258,10 +255,13 @@ enum qlink_cmd_type {
 	QLINK_CMD_DEL_STA		= 0x0052,
 	QLINK_CMD_SCAN			= 0x0053,
 	QLINK_CMD_CHAN_STATS		= 0x0054,
+	QLINK_CMD_NDEV_EVENT		= 0x0055,
 	QLINK_CMD_CONNECT		= 0x0060,
 	QLINK_CMD_DISCONNECT		= 0x0061,
 	QLINK_CMD_PM_SET		= 0x0062,
 	QLINK_CMD_WOWLAN_SET		= 0x0063,
+	QLINK_CMD_EXTERNAL_AUTH		= 0x0066,
+	QLINK_CMD_TXPWR			= 0x0067,
 };
 
 /**
@@ -331,22 +331,26 @@ struct qlink_cmd_mgmt_frame_register {
 	u8 do_register;
 } __packed;
 
-enum qlink_mgmt_frame_tx_flags {
-	QLINK_MGMT_FRAME_TX_FLAG_NONE		= 0,
-	QLINK_MGMT_FRAME_TX_FLAG_OFFCHAN	= BIT(0),
-	QLINK_MGMT_FRAME_TX_FLAG_NO_CCK		= BIT(1),
-	QLINK_MGMT_FRAME_TX_FLAG_ACK_NOWAIT	= BIT(2),
+/**
+ * @QLINK_FRAME_TX_FLAG_8023: frame has a 802.3 header; if not set, frame
+ *	is a 802.11 encapsulated.
+ */
+enum qlink_frame_tx_flags {
+	QLINK_FRAME_TX_FLAG_OFFCHAN	= BIT(0),
+	QLINK_FRAME_TX_FLAG_NO_CCK	= BIT(1),
+	QLINK_FRAME_TX_FLAG_ACK_NOWAIT	= BIT(2),
+	QLINK_FRAME_TX_FLAG_8023	= BIT(3),
 };
 
 /**
- * struct qlink_cmd_mgmt_frame_tx - data for QLINK_CMD_SEND_MGMT_FRAME command
+ * struct qlink_cmd_frame_tx - data for QLINK_CMD_SEND_FRAME command
  *
  * @cookie: opaque request identifier.
  * @freq: Frequency to use for frame transmission.
- * @flags: Transmission flags, one of &enum qlink_mgmt_frame_tx_flags.
+ * @flags: Transmission flags, one of &enum qlink_frame_tx_flags.
  * @frame_data: frame to transmit.
  */
-struct qlink_cmd_mgmt_frame_tx {
+struct qlink_cmd_frame_tx {
 	struct qlink_cmd chdr;
 	__le32 cookie;
 	__le16 freq;
@@ -493,6 +497,20 @@ struct qlink_cmd_connect {
 } __packed;
 
 /**
+ * struct qlink_cmd_external_auth - data for QLINK_CMD_EXTERNAL_AUTH command
+ *
+ * @bssid: BSSID of the BSS to connect to
+ * @status: authentication status code
+ * @payload: variable portion of connection request.
+ */
+struct qlink_cmd_external_auth {
+	struct qlink_cmd chdr;
+	u8 bssid[ETH_ALEN];
+	__le16 status;
+	u8 payload[0];
+} __packed;
+
+/**
  * struct qlink_cmd_disconnect - data for QLINK_CMD_DISCONNECT command
  *
  * @reason: code of the reason of disconnect, see &enum ieee80211_reasoncode.
@@ -576,12 +594,22 @@ enum qlink_user_reg_hint_type {
  * @initiator: which entity sent the request, one of &enum qlink_reg_initiator.
  * @user_reg_hint_type: type of hint for QLINK_REGDOM_SET_BY_USER request, one
  *	of &enum qlink_user_reg_hint_type.
+ * @num_channels: number of &struct qlink_tlv_channel in a variable portion of a
+ *	payload.
+ * @slave_radar: whether slave device should enable radar detection.
+ * @dfs_region: one of &enum qlink_dfs_regions.
+ * @info: variable portion of regulatory notifier callback.
  */
 struct qlink_cmd_reg_notify {
 	struct qlink_cmd chdr;
 	u8 alpha2[2];
 	u8 initiator;
 	u8 user_reg_hint_type;
+	u8 num_channels;
+	u8 dfs_region;
+	u8 slave_radar;
+	u8 rsvd[1];
+	u8 info[0];
 } __packed;
 
 /**
@@ -699,6 +727,32 @@ struct qlink_cmd_pm_set {
 } __packed;
 
 /**
+ * enum qlink_txpwr_op - transmit power operation type
+ * @QLINK_TXPWR_SET: set tx power
+ * @QLINK_TXPWR_GET: get current tx power setting
+ */
+enum qlink_txpwr_op {
+	QLINK_TXPWR_SET,
+	QLINK_TXPWR_GET
+};
+
+/**
+ * struct qlink_cmd_txpwr - get or set current transmit power
+ *
+ * @txpwr: new transmit power setting, in mBm
+ * @txpwr_setting: transmit power setting type, one of
+ *	&enum nl80211_tx_power_setting
+ * @op_type: type of operation, one of &enum qlink_txpwr_op
+ */
+struct qlink_cmd_txpwr {
+	struct qlink_cmd chdr;
+	__le32 txpwr;
+	u8 txpwr_setting;
+	u8 op_type;
+	u8 rsvd[2];
+} __packed;
+
+/**
  * enum qlink_wowlan_trigger
  *
  * @QLINK_WOWLAN_TRIG_DISCONNECT: wakeup on disconnect
@@ -722,6 +776,42 @@ struct qlink_cmd_wowlan_set {
 	u8 data[0];
 } __packed;
 
+enum qlink_ndev_event_type {
+	QLINK_NDEV_EVENT_CHANGEUPPER,
+};
+
+/**
+ * struct qlink_cmd_ndev_event - data for QLINK_CMD_NDEV_EVENT command
+ *
+ * @event: type of event, one of &enum qlink_ndev_event_type
+ */
+struct qlink_cmd_ndev_event {
+	struct qlink_cmd chdr;
+	__le16 event;
+	u8 rsvd[2];
+} __packed;
+
+enum qlink_ndev_upper_type {
+	QLINK_NDEV_UPPER_TYPE_NONE,
+	QLINK_NDEV_UPPER_TYPE_BRIDGE,
+};
+
+/**
+ * struct qlink_cmd_ndev_changeupper - data for QLINK_NDEV_EVENT_CHANGEUPPER
+ *
+ * @br_domain: layer 2 broadcast domain ID that ndev is a member of
+ * @upper_type: type of upper device, one of &enum qlink_ndev_upper_type
+ */
+struct qlink_cmd_ndev_changeupper {
+	struct qlink_cmd_ndev_event nehdr;
+	__le64 flags;
+	__le32 br_domain;
+	__le32 netspace_id;
+	__le16 vlanid;
+	u8 upper_type;
+	u8 rsvd[1];
+} __packed;
+
 /* QLINK Command Responses messages related definitions
  */
 
@@ -733,6 +823,7 @@ enum qlink_cmd_result {
 	QLINK_CMD_RESULT_EALREADY,
 	QLINK_CMD_RESULT_EADDRINUSE,
 	QLINK_CMD_RESULT_EADDRNOTAVAIL,
+	QLINK_CMD_RESULT_EBUSY,
 };
 
 /**
@@ -760,6 +851,18 @@ struct qlink_resp {
 } __packed;
 
 /**
+ * enum qlink_dfs_regions - regulatory DFS regions
+ *
+ * Corresponds to &enum nl80211_dfs_regions.
+ */
+enum qlink_dfs_regions {
+	QLINK_DFS_UNSET	= 0,
+	QLINK_DFS_FCC	= 1,
+	QLINK_DFS_ETSI	= 2,
+	QLINK_DFS_JP	= 3,
+};
+
+/**
  * struct qlink_resp_get_mac_info - response for QLINK_CMD_MAC_INFO command
  *
  * Data describing specific physical device providing wireless MAC
@@ -774,6 +877,10 @@ struct qlink_resp {
  * @bands_cap: wireless bands WMAC can operate in, bitmap of &enum qlink_band.
  * @max_ap_assoc_sta: Maximum number of associations supported by WMAC.
  * @radar_detect_widths: bitmask of channels BW for which WMAC can detect radar.
+ * @alpha2: country code ID firmware is configured to.
+ * @n_reg_rules: number of regulatory rules TLVs in variable portion of the
+ *	message.
+ * @dfs_region: regulatory DFS region, one of &enum qlink_dfs_regions.
  * @var_info: variable-length WMAC info data.
  */
 struct qlink_resp_get_mac_info {
@@ -787,21 +894,12 @@ struct qlink_resp_get_mac_info {
 	__le16 radar_detect_widths;
 	__le32 max_acl_mac_addrs;
 	u8 bands_cap;
+	u8 alpha2[2];
+	u8 n_reg_rules;
+	u8 dfs_region;
 	u8 rsvd[1];
 	u8 var_info[0];
 } __packed;
-
-/**
- * enum qlink_dfs_regions - regulatory DFS regions
- *
- * Corresponds to &enum nl80211_dfs_regions.
- */
-enum qlink_dfs_regions {
-	QLINK_DFS_UNSET	= 0,
-	QLINK_DFS_FCC	= 1,
-	QLINK_DFS_ETSI	= 2,
-	QLINK_DFS_JP	= 3,
-};
 
 /**
  * struct qlink_resp_get_hw_info - response for QLINK_CMD_GET_HW_INFO command
@@ -815,11 +913,7 @@ enum qlink_dfs_regions {
  * @mac_bitmap: Bitmap of MAC IDs that are active and can be used in firmware.
  * @total_tx_chains: total number of transmit chains used by device.
  * @total_rx_chains: total number of receive chains.
- * @alpha2: country code ID firmware is configured to.
- * @n_reg_rules: number of regulatory rules TLVs in variable portion of the
- *	message.
- * @dfs_region: regulatory DFS region, one of @enum qlink_dfs_region.
- * @info: variable-length HW info, can contain QTN_TLV_ID_REG_RULE.
+ * @info: variable-length HW info.
  */
 struct qlink_resp_get_hw_info {
 	struct qlink_resp rhdr;
@@ -833,9 +927,6 @@ struct qlink_resp_get_hw_info {
 	u8 mac_bitmap;
 	u8 total_tx_chain;
 	u8 total_rx_chain;
-	u8 alpha2[2];
-	u8 n_reg_rules;
-	u8 dfs_region;
 	u8 info[0];
 } __packed;
 
@@ -923,6 +1014,19 @@ struct qlink_resp_channel_get {
 	struct qlink_chandef chan;
 } __packed;
 
+/**
+ * struct qlink_resp_txpwr - response for QLINK_CMD_TXPWR command
+ *
+ * This response is intended for QLINK_TXPWR_GET operation and does not
+ * contain any meaningful information in case of QLINK_TXPWR_SET operation.
+ *
+ * @txpwr: current transmit power setting, in mBm
+ */
+struct qlink_resp_txpwr {
+	struct qlink_resp rhdr;
+	__le32 txpwr;
+} __packed;
+
 /* QLINK Events messages related definitions
  */
 
@@ -936,6 +1040,8 @@ enum qlink_event_type {
 	QLINK_EVENT_BSS_LEAVE		= 0x0027,
 	QLINK_EVENT_FREQ_CHANGE		= 0x0028,
 	QLINK_EVENT_RADAR		= 0x0029,
+	QLINK_EVENT_EXTERNAL_AUTH	= 0x0030,
+	QLINK_EVENT_MIC_FAILURE		= 0x0031,
 };
 
 /**
@@ -986,13 +1092,16 @@ struct qlink_event_sta_deauth {
 /**
  * struct qlink_event_bss_join - data for QLINK_EVENT_BSS_JOIN event
  *
+ * @chan: new operating channel definition
  * @bssid: BSSID of a BSS which interface tried to joined.
  * @status: status of joining attempt, see &enum ieee80211_statuscode.
  */
 struct qlink_event_bss_join {
 	struct qlink_event ehdr;
+	struct qlink_chandef chan;
 	u8 bssid[ETH_ALEN];
 	__le16 status;
+	u8 ies[0];
 } __packed;
 
 /**
@@ -1108,6 +1217,38 @@ struct qlink_event_radar {
 	u8 rsvd[3];
 } __packed;
 
+/**
+ * struct qlink_event_external_auth - data for QLINK_EVENT_EXTERNAL_AUTH event
+ *
+ * @ssid: SSID announced by BSS
+ * @ssid_len: SSID length
+ * @bssid: BSSID of the BSS to connect to
+ * @akm_suite: AKM suite for external authentication
+ * @action: action type/trigger for external authentication
+ */
+struct qlink_event_external_auth {
+	struct qlink_event ehdr;
+	u8 ssid[IEEE80211_MAX_SSID_LEN];
+	u8 ssid_len;
+	u8 bssid[ETH_ALEN];
+	__le32 akm_suite;
+	u8 action;
+} __packed;
+
+/**
+ * struct qlink_event_mic_failure - data for QLINK_EVENT_MIC_FAILURE event
+ *
+ * @src: source MAC address of the frame
+ * @key_index: index of the key being reported
+ * @pairwise: whether the key is pairwise or group
+ */
+struct qlink_event_mic_failure {
+	struct qlink_event ehdr;
+	u8 src[ETH_ALEN];
+	u8 key_index;
+	u8 pairwise;
+} __packed;
+
 /* QLINK TLVs (Type-Length Values) definitions
  */
 
@@ -1121,6 +1262,14 @@ struct qlink_event_radar {
  *	carried by QTN_TLV_ID_STA_STATS_MAP.
  * @QTN_TLV_ID_MAX_SCAN_SSIDS: maximum number of SSIDs the device can scan
  *	for in any given scan.
+ * @QTN_TLV_ID_SCAN_DWELL_ACTIVE: time spent on a single channel for an active
+ *	scan.
+ * @QTN_TLV_ID_SCAN_DWELL_PASSIVE: time spent on a single channel for a passive
+ *	scan.
+ * @QTN_TLV_ID_SCAN_SAMPLE_DURATION: total duration of sampling a single channel
+ *	during a scan including off-channel dwell time and operating channel
+ *	time.
+ * @QTN_TLV_ID_IFTYPE_DATA: supported band data.
  */
 enum qlink_tlv_id {
 	QTN_TLV_ID_FRAG_THRESH		= 0x0201,
@@ -1153,7 +1302,10 @@ enum qlink_tlv_id {
 	QTN_TLV_ID_WOWLAN_CAPAB		= 0x0410,
 	QTN_TLV_ID_WOWLAN_PATTERN	= 0x0411,
 	QTN_TLV_ID_SCAN_FLUSH		= 0x0412,
-	QTN_TLV_ID_SCAN_DWELL		= 0x0413,
+	QTN_TLV_ID_SCAN_DWELL_ACTIVE	= 0x0413,
+	QTN_TLV_ID_SCAN_DWELL_PASSIVE	= 0x0416,
+	QTN_TLV_ID_SCAN_SAMPLE_DURATION	= 0x0417,
+	QTN_TLV_ID_IFTYPE_DATA		= 0x0418,
 };
 
 struct qlink_tlv_hdr {
@@ -1182,7 +1334,7 @@ struct qlink_iface_limit_record {
 
 struct qlink_tlv_frag_rts_thr {
 	struct qlink_tlv_hdr hdr;
-	__le16 thr;
+	__le32 thr;
 } __packed;
 
 struct qlink_tlv_rlimit {
@@ -1313,6 +1465,39 @@ struct qlink_tlv_ie_set {
 	u8 type;
 	u8 flags;
 	u8 ie_data[0];
+} __packed;
+
+/**
+ * struct qlink_tlv_ext_ie - extension IE
+ *
+ * @eid_ext: element ID extension, one of &enum ieee80211_eid_ext.
+ * @ie_data: IEs data.
+ */
+struct qlink_tlv_ext_ie {
+	struct qlink_tlv_hdr hdr;
+	u8 eid_ext;
+	u8 ie_data[0];
+} __packed;
+
+#define IEEE80211_HE_PPE_THRES_MAX_LEN		25
+struct qlink_sband_iftype_data {
+	__le16 types_mask;
+	struct ieee80211_he_cap_elem he_cap_elem;
+	struct ieee80211_he_mcs_nss_supp he_mcs_nss_supp;
+	u8 ppe_thres[IEEE80211_HE_PPE_THRES_MAX_LEN];
+} __packed;
+
+/**
+ * struct qlink_tlv_iftype_data - data for QTN_TLV_ID_IFTYPE_DATA
+ *
+ * @n_iftype_data: number of entries in iftype_data.
+ * @iftype_data: interface type data entries.
+ */
+struct qlink_tlv_iftype_data {
+	struct qlink_tlv_hdr hdr;
+	u8 n_iftype_data;
+	u8 rsvd[3];
+	struct qlink_sband_iftype_data iftype_data[0];
 } __packed;
 
 struct qlink_chan_stats {

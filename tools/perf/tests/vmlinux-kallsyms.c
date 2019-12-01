@@ -3,9 +3,11 @@
 #include <linux/rbtree.h>
 #include <inttypes.h>
 #include <string.h>
+#include <stdlib.h>
+#include "dso.h"
 #include "map.h"
 #include "symbol.h"
-#include "util.h"
+#include <internal/lib.h> // page_size
 #include "tests.h"
 #include "debug.h"
 #include "machine.h"
@@ -161,9 +163,16 @@ next_pair:
 
 				continue;
 			}
-		} else
+		} else if (mem_start == kallsyms.vmlinux_map->end) {
+			/*
+			 * Ignore aliases to _etext, i.e. to the end of the kernel text area,
+			 * such as __indirect_thunk_end.
+			 */
+			continue;
+		} else {
 			pr_debug("ERR : %#" PRIx64 ": %s not on kallsyms\n",
 				 mem_start, sym->name);
+		}
 
 		err = -1;
 	}
@@ -173,7 +182,7 @@ next_pair:
 
 	header_printed = false;
 
-	for (map = maps__first(maps); map; map = map__next(map)) {
+	maps__for_each_entry(maps, map) {
 		struct map *
 		/*
 		 * If it is the kernel, kallsyms is always "[kernel.kallsyms]", while
@@ -198,7 +207,7 @@ next_pair:
 
 	header_printed = false;
 
-	for (map = maps__first(maps); map; map = map__next(map)) {
+	maps__for_each_entry(maps, map) {
 		struct map *pair;
 
 		mem_start = vmlinux_map->unmap_ip(vmlinux_map, map->start);
@@ -228,7 +237,7 @@ next_pair:
 
 	maps = machine__kernel_maps(&kallsyms);
 
-	for (map = maps__first(maps); map; map = map__next(map)) {
+	maps__for_each_entry(maps, map) {
 		if (!map->priv) {
 			if (!header_printed) {
 				pr_info("WARN: Maps only in kallsyms:\n");

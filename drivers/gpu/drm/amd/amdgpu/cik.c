@@ -24,7 +24,8 @@
 #include <linux/firmware.h>
 #include <linux/slab.h>
 #include <linux/module.h>
-#include <drm/drmP.h>
+#include <linux/pci.h>
+
 #include "amdgpu.h"
 #include "amdgpu_atombios.h"
 #include "amdgpu_ih.h"
@@ -965,6 +966,25 @@ static bool cik_read_bios_from_rom(struct amdgpu_device *adev,
 
 static const struct amdgpu_allowed_register_entry cik_allowed_read_registers[] = {
 	{mmGRBM_STATUS},
+	{mmGRBM_STATUS2},
+	{mmGRBM_STATUS_SE0},
+	{mmGRBM_STATUS_SE1},
+	{mmGRBM_STATUS_SE2},
+	{mmGRBM_STATUS_SE3},
+	{mmSRBM_STATUS},
+	{mmSRBM_STATUS2},
+	{mmSDMA0_STATUS_REG + SDMA0_REGISTER_OFFSET},
+	{mmSDMA0_STATUS_REG + SDMA1_REGISTER_OFFSET},
+	{mmCP_STAT},
+	{mmCP_STALLED_STAT1},
+	{mmCP_STALLED_STAT2},
+	{mmCP_STALLED_STAT3},
+	{mmCP_CPF_BUSY_STAT},
+	{mmCP_CPF_STALLED_STAT1},
+	{mmCP_CPF_STATUS},
+	{mmCP_CPC_BUSY_STAT},
+	{mmCP_CPC_STALLED_STAT1},
+	{mmCP_CPC_STATUS},
 	{mmGB_ADDR_CONFIG},
 	{mmMC_ARB_RAMCFG},
 	{mmGB_TILE_MODE0},
@@ -1269,6 +1289,51 @@ static int cik_gpu_pci_config_reset(struct amdgpu_device *adev)
 }
 
 /**
+ * cik_asic_pci_config_reset - soft reset GPU
+ *
+ * @adev: amdgpu_device pointer
+ *
+ * Use PCI Config method to reset the GPU.
+ *
+ * Returns 0 for success.
+ */
+static int cik_asic_pci_config_reset(struct amdgpu_device *adev)
+{
+	int r;
+
+	amdgpu_atombios_scratch_regs_engine_hung(adev, true);
+
+	r = cik_gpu_pci_config_reset(adev);
+
+	amdgpu_atombios_scratch_regs_engine_hung(adev, false);
+
+	return r;
+}
+
+static enum amd_reset_method
+cik_asic_reset_method(struct amdgpu_device *adev)
+{
+	bool baco_reset;
+
+	switch (adev->asic_type) {
+	case CHIP_BONAIRE:
+	case CHIP_HAWAII:
+		/* disable baco reset until it works */
+		/* smu7_asic_get_baco_capability(adev, &baco_reset); */
+		baco_reset = false;
+		break;
+	default:
+		baco_reset = false;
+		break;
+	}
+
+	if (baco_reset)
+		return AMD_RESET_METHOD_BACO;
+	else
+		return AMD_RESET_METHOD_LEGACY;
+}
+
+/**
  * cik_asic_reset - soft reset GPU
  *
  * @adev: amdgpu_device pointer
@@ -1281,11 +1346,10 @@ static int cik_asic_reset(struct amdgpu_device *adev)
 {
 	int r;
 
-	amdgpu_atombios_scratch_regs_engine_hung(adev, true);
-
-	r = cik_gpu_pci_config_reset(adev);
-
-	amdgpu_atombios_scratch_regs_engine_hung(adev, false);
+	if (cik_asic_reset_method(adev) == AMD_RESET_METHOD_BACO)
+		r = smu7_asic_baco_reset(adev);
+	else
+		r = cik_asic_pci_config_reset(adev);
 
 	return r;
 }
@@ -1741,12 +1805,88 @@ static bool cik_need_full_reset(struct amdgpu_device *adev)
 	return true;
 }
 
+static void cik_get_pcie_usage(struct amdgpu_device *adev, uint64_t *count0,
+			       uint64_t *count1)
+{
+	uint32_t perfctr = 0;
+	uint64_t cnt0_of, cnt1_of;
+	int tmp;
+
+	/* This reports 0 on APUs, so return to avoid writing/reading registers
+	 * that may or may not be different from their GPU counterparts
+	 */
+	if (adev->flags & AMD_IS_APU)
+		return;
+
+	/* Set the 2 events that we wish to watch, defined above */
+	/* Reg 40 is # received msgs, Reg 104 is # of posted requests sent */
+	perfctr = REG_SET_FIELD(perfctr, PCIE_PERF_CNTL_TXCLK, EVENT0_SEL, 40);
+	perfctr = REG_SET_FIELD(perfctr, PCIE_PERF_CNTL_TXCLK, EVENT1_SEL, 104);
+
+	/* Write to enable desired perf counters */
+	WREG32_PCIE(ixPCIE_PERF_CNTL_TXCLK, perfctr);
+	/* Zero out and enable the perf counters
+	 * Write 0x5:
+	 * Bit 0 = Start all counters(1)
+	 * Bit 2 = Global counter reset enable(1)
+	 */
+	WREG32_PCIE(ixPCIE_PERF_COUNT_CNTL, 0x00000005);
+
+	msleep(1000);
+
+	/* Load the shadow and disable the perf counters
+	 * Write 0x2:
+	 * Bit 0 = Stop counters(0)
+	 * Bit 1 = Load the shadow counters(1)
+	 */
+	WREG32_PCIE(ixPCIE_PERF_COUNT_CNTL, 0x00000002);
+
+	/* Read register values to get any >32bit overflow */
+	tmp = RREG32_PCIE(ixPCIE_PERF_CNTL_TXCLK);
+	cnt0_of = REG_GET_FIELD(tmp, PCIE_PERF_CNTL_TXCLK, COUNTER0_UPPER);
+	cnt1_of = REG_GET_FIELD(tmp, PCIE_PERF_CNTL_TXCLK, COUNTER1_UPPER);
+
+	/* Get the values and add the overflow */
+	*count0 = RREG32_PCIE(ixPCIE_PERF_COUNT0_TXCLK) | (cnt0_of << 32);
+	*count1 = RREG32_PCIE(ixPCIE_PERF_COUNT1_TXCLK) | (cnt1_of << 32);
+}
+
+static bool cik_need_reset_on_init(struct amdgpu_device *adev)
+{
+	u32 clock_cntl, pc;
+
+	if (adev->flags & AMD_IS_APU)
+		return false;
+
+	/* check if the SMC is already running */
+	clock_cntl = RREG32_SMC(ixSMC_SYSCON_CLOCK_CNTL_0);
+	pc = RREG32_SMC(ixSMC_PC_C);
+	if ((0 == REG_GET_FIELD(clock_cntl, SMC_SYSCON_CLOCK_CNTL_0, ck_disable)) &&
+	    (0x20100 <= pc))
+		return true;
+
+	return false;
+}
+
+static uint64_t cik_get_pcie_replay_count(struct amdgpu_device *adev)
+{
+	uint64_t nak_r, nak_g;
+
+	/* Get the number of NAKs received and generated */
+	nak_r = RREG32_PCIE(ixPCIE_RX_NUM_NAK);
+	nak_g = RREG32_PCIE(ixPCIE_RX_NUM_NAK_GENERATED);
+
+	/* Add the total number of NAKs, i.e the number of replays */
+	return (nak_r + nak_g);
+}
+
 static const struct amdgpu_asic_funcs cik_asic_funcs =
 {
 	.read_disabled_bios = &cik_read_disabled_bios,
 	.read_bios_from_rom = &cik_read_bios_from_rom,
 	.read_register = &cik_read_register,
 	.reset = &cik_asic_reset,
+	.reset_method = &cik_asic_reset_method,
 	.set_vga_state = &cik_vga_set_state,
 	.get_xclk = &cik_get_xclk,
 	.set_uvd_clocks = &cik_set_uvd_clocks,
@@ -1756,6 +1896,9 @@ static const struct amdgpu_asic_funcs cik_asic_funcs =
 	.invalidate_hdp = &cik_invalidate_hdp,
 	.need_full_reset = &cik_need_full_reset,
 	.init_doorbell_index = &legacy_doorbell_index_init,
+	.get_pcie_usage = &cik_get_pcie_usage,
+	.need_reset_on_init = &cik_need_reset_on_init,
+	.get_pcie_replay_count = &cik_get_pcie_replay_count,
 };
 
 static int cik_common_early_init(void *handle)
@@ -2005,10 +2148,7 @@ int cik_set_ip_blocks(struct amdgpu_device *adev)
 		amdgpu_device_ip_block_add(adev, &cik_ih_ip_block);
 		amdgpu_device_ip_block_add(adev, &gfx_v7_2_ip_block);
 		amdgpu_device_ip_block_add(adev, &cik_sdma_ip_block);
-		if (amdgpu_dpm == -1)
-			amdgpu_device_ip_block_add(adev, &pp_smu_ip_block);
-		else
-			amdgpu_device_ip_block_add(adev, &ci_smu_ip_block);
+		amdgpu_device_ip_block_add(adev, &pp_smu_ip_block);
 		if (adev->enable_virtual_display)
 			amdgpu_device_ip_block_add(adev, &dce_virtual_ip_block);
 #if defined(CONFIG_DRM_AMD_DC)
@@ -2026,10 +2166,7 @@ int cik_set_ip_blocks(struct amdgpu_device *adev)
 		amdgpu_device_ip_block_add(adev, &cik_ih_ip_block);
 		amdgpu_device_ip_block_add(adev, &gfx_v7_3_ip_block);
 		amdgpu_device_ip_block_add(adev, &cik_sdma_ip_block);
-		if (amdgpu_dpm == -1)
-			amdgpu_device_ip_block_add(adev, &pp_smu_ip_block);
-		else
-			amdgpu_device_ip_block_add(adev, &ci_smu_ip_block);
+		amdgpu_device_ip_block_add(adev, &pp_smu_ip_block);
 		if (adev->enable_virtual_display)
 			amdgpu_device_ip_block_add(adev, &dce_virtual_ip_block);
 #if defined(CONFIG_DRM_AMD_DC)

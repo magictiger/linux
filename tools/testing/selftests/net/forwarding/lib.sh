@@ -17,6 +17,9 @@ NETIF_TYPE=${NETIF_TYPE:=veth}
 NETIF_CREATE=${NETIF_CREATE:=yes}
 MCD=${MCD:=smcrouted}
 MC_CLI=${MC_CLI:=smcroutectl}
+PING_TIMEOUT=${PING_TIMEOUT:=5}
+WAIT_TIMEOUT=${WAIT_TIMEOUT:=20}
+INTERFACE_TIMEOUT=${INTERFACE_TIMEOUT:=600}
 
 relative_path="${BASH_SOURCE%/*}"
 if [[ "$relative_path" == "${BASH_SOURCE}" ]]; then
@@ -211,7 +214,7 @@ log_test()
 		return 1
 	fi
 
-	printf "TEST: %-60s  [PASS]\n" "$test_name $opt_str"
+	printf "TEST: %-60s  [ OK ]\n" "$test_name $opt_str"
 	return 0
 }
 
@@ -225,28 +228,73 @@ log_info()
 setup_wait_dev()
 {
 	local dev=$1; shift
+	local wait_time=${1:-$WAIT_TIME}; shift
 
-	while true; do
+	setup_wait_dev_with_timeout "$dev" $INTERFACE_TIMEOUT $wait_time
+
+	if (($?)); then
+		check_err 1
+		log_test setup_wait_dev ": Interface $dev does not come up."
+		exit 1
+	fi
+}
+
+setup_wait_dev_with_timeout()
+{
+	local dev=$1; shift
+	local max_iterations=${1:-$WAIT_TIMEOUT}; shift
+	local wait_time=${1:-$WAIT_TIME}; shift
+	local i
+
+	for ((i = 1; i <= $max_iterations; ++i)); do
 		ip link show dev $dev up \
 			| grep 'state UP' &> /dev/null
 		if [[ $? -ne 0 ]]; then
 			sleep 1
 		else
-			break
+			sleep $wait_time
+			return 0
 		fi
 	done
+
+	return 1
 }
 
 setup_wait()
 {
 	local num_netifs=${1:-$NUM_NETIFS}
+	local i
 
 	for ((i = 1; i <= num_netifs; ++i)); do
-		setup_wait_dev ${NETIFS[p$i]}
+		setup_wait_dev ${NETIFS[p$i]} 0
 	done
 
 	# Make sure links are ready.
 	sleep $WAIT_TIME
+}
+
+cmd_jq()
+{
+	local cmd=$1
+	local jq_exp=$2
+	local jq_opts=$3
+	local ret
+	local output
+
+	output="$($cmd)"
+	# it the command fails, return error right away
+	ret=$?
+	if [[ $ret -ne 0 ]]; then
+		return $ret
+	fi
+	output=$(echo $output | jq -r $jq_opts "$jq_exp")
+	ret=$?
+	if [[ $ret -ne 0 ]]; then
+		return $ret
+	fi
+	echo $output
+	# return success only in case of non-empty output
+	[ ! -z "$output" ]
 }
 
 lldpad_app_wait_set()
@@ -820,7 +868,8 @@ ping_do()
 	local vrf_name
 
 	vrf_name=$(master_name_get $if_name)
-	ip vrf exec $vrf_name $PING $args $dip -c 10 -i 0.1 -w 2 &> /dev/null
+	ip vrf exec $vrf_name \
+		$PING $args $dip -c 10 -i 0.1 -w $PING_TIMEOUT &> /dev/null
 }
 
 ping_test()
@@ -840,7 +889,8 @@ ping6_do()
 	local vrf_name
 
 	vrf_name=$(master_name_get $if_name)
-	ip vrf exec $vrf_name $PING6 $args $dip -c 10 -i 0.1 -w 2 &> /dev/null
+	ip vrf exec $vrf_name \
+		$PING6 $args $dip -c 10 -i 0.1 -w $PING_TIMEOUT &> /dev/null
 }
 
 ping6_test()
