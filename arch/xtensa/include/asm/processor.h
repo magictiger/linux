@@ -18,12 +18,6 @@
 #include <asm/types.h>
 #include <asm/regs.h>
 
-/* Assertions. */
-
-#if (XCHAL_HAVE_WINDOWED != 1)
-# error Linux requires the Xtensa Windowed Registers Option.
-#endif
-
 /* Xtensa ABI requires stack alignment to be at least 16 */
 
 #define STACK_ALIGN (XCHAL_DATA_WIDTH > 16 ? XCHAL_DATA_WIDTH : 16)
@@ -105,7 +99,17 @@
 #define WSBITS  (XCHAL_NUM_AREGS / 4)      /* width of WINDOWSTART in bits */
 #define WBBITS  (XCHAL_NUM_AREGS_LOG2 - 2) /* width of WINDOWBASE in bits */
 
+#if defined(__XTENSA_WINDOWED_ABI__)
+#define KERNEL_PS_WOE_MASK PS_WOE_MASK
+#elif defined(__XTENSA_CALL0_ABI__)
+#define KERNEL_PS_WOE_MASK 0
+#else
+#error Unsupported xtensa ABI
+#endif
+
 #ifndef __ASSEMBLY__
+
+#if defined(__XTENSA_WINDOWED_ABI__)
 
 /* Build a valid return address for the specified call winsize.
  * winsize must be 1 (call4), 2 (call8), or 3 (call12)
@@ -116,6 +120,22 @@
  * Note: We assume that the stack pointer is in the same 1GB ranges as the ra
  */
 #define MAKE_PC_FROM_RA(ra,sp)    (((ra) & 0x3fffffff) | ((sp) & 0xc0000000))
+
+#elif defined(__XTENSA_CALL0_ABI__)
+
+/* Build a valid return address for the specified call winsize.
+ * winsize must be 1 (call4), 2 (call8), or 3 (call12)
+ */
+#define MAKE_RA_FOR_CALL(ra, ws)   (ra)
+
+/* Convert return address to a valid pc
+ * Note: We assume that the stack pointer is in the same 1GB ranges as the ra
+ */
+#define MAKE_PC_FROM_RA(ra, sp)    (ra)
+
+#else
+#error Unsupported Xtensa ABI
+#endif
 
 /* Spill slot location for the register reg in the spill area under the stack
  * pointer sp. reg must be in the range [0..4).
@@ -195,6 +215,7 @@ struct thread_struct {
 /* Clearing a0 terminates the backtrace. */
 #define start_thread(regs, new_pc, new_sp) \
 	do { \
+		unsigned long syscall = (regs)->syscall; \
 		memset((regs), 0, sizeof(*(regs))); \
 		(regs)->pc = (new_pc); \
 		(regs)->ps = USER_PS_VALUE; \
@@ -204,7 +225,7 @@ struct thread_struct {
 		(regs)->depc = 0; \
 		(regs)->windowbase = 0; \
 		(regs)->windowstart = 1; \
-		(regs)->syscall = NO_SYSCALL; \
+		(regs)->syscall = syscall; \
 	} while (0)
 
 /* Forward declaration */
@@ -214,7 +235,7 @@ struct mm_struct;
 /* Free all resources held by a thread. */
 #define release_thread(thread) do { } while(0)
 
-extern unsigned long get_wchan(struct task_struct *p);
+extern unsigned long __get_wchan(struct task_struct *p);
 
 #define KSTK_EIP(tsk)		(task_pt_regs(tsk)->pc)
 #define KSTK_ESP(tsk)		(task_pt_regs(tsk)->areg[1])
@@ -235,10 +256,6 @@ extern unsigned long get_wchan(struct task_struct *p);
 	 __asm__ __volatile__ ("rsr %0, "__stringify(sr) : "=a"(v)); \
 	 v; \
 	 })
-
-#ifndef XCHAL_HAVE_EXTERN_REGS
-#define XCHAL_HAVE_EXTERN_REGS 0
-#endif
 
 #if XCHAL_HAVE_EXTERN_REGS
 

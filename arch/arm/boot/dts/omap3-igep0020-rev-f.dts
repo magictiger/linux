@@ -2,7 +2,7 @@
 /*
  * Device Tree Source for IGEPv2 Rev. F (TI OMAP AM/DM37x)
  *
- * Copyright (C) 2012 Javier Martinez Canillas <javier@osg.samsung.com>
+ * Copyright (C) Javier Martinez Canillas <javier@dowhile0.org>
  * Copyright (C) 2012 Enric Balletbo i Serra <eballetbo@gmail.com>
  */
 
@@ -47,5 +47,13 @@
 		reg = <2>;
 		interrupt-parent = <&gpio6>;
 		interrupts = <17 IRQ_TYPE_EDGE_RISING>; /* gpio 177 */
+	};
+};
+
+&uart2 {
+	bluetooth {
+		compatible = "ti,wl1835-st";
+		enable-gpios = <&gpio5 9 GPIO_ACTIVE_HIGH>; /* gpio 137 */
+		max-speed = <300000>;
 	};
 };

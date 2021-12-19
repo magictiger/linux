@@ -4,12 +4,12 @@
 
 #include <linux/types.h>
 
-struct map_groups;
+struct maps;
 struct map;
 struct symbol;
 
 struct map_symbol {
-	struct map_groups *mg;
+	struct maps   *maps;
 	struct map    *map;
 	struct symbol *sym;
 };
@@ -19,5 +19,6 @@ struct addr_map_symbol {
 	u64	      addr;
 	u64	      al_addr;
 	u64	      phys_addr;
+	u64	      data_page_size;
 };
 #endif // __PERF_MAP_SYMBOL

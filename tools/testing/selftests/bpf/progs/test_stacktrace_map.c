@@ -2,7 +2,7 @@
 // Copyright (c) 2018 Facebook
 
 #include <linux/bpf.h>
-#include "bpf_helpers.h"
+#include <bpf/bpf_helpers.h>
 
 #ifndef PERF_MAX_STACK_DEPTH
 #define PERF_MAX_STACK_DEPTH         127
@@ -27,8 +27,8 @@ typedef __u64 stack_trace_t[PERF_MAX_STACK_DEPTH];
 struct {
 	__uint(type, BPF_MAP_TYPE_STACK_TRACE);
 	__uint(max_entries, 16384);
-	__uint(key_size, sizeof(__u32));
-	__uint(value_size, sizeof(stack_trace_t));
+	__type(key, __u32);
+	__type(value, stack_trace_t);
 } stackmap SEC(".maps");
 
 struct {

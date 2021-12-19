@@ -28,7 +28,6 @@ int amdgpu_umc_ras_late_init(struct amdgpu_device *adev)
 	int r;
 	struct ras_fs_if fs_info = {
 		.sysfs_name = "umc_err_count",
-		.debugfs_name = "umc_err_inject",
 	};
 	struct ras_ih_if ih_info = {
 		.cb = amdgpu_umc_process_ras_data_cb,
@@ -42,7 +41,6 @@ int amdgpu_umc_ras_late_init(struct amdgpu_device *adev)
 		adev->umc.ras_if->block = AMDGPU_RAS_BLOCK__UMC;
 		adev->umc.ras_if->type = AMDGPU_RAS_ERROR__MULTI_UNCORRECTABLE;
 		adev->umc.ras_if->sub_block_index = 0;
-		strcpy(adev->umc.ras_if->name, "umc");
 	}
 	ih_info.head = fs_info.head = *adev->umc.ras_if;
 
@@ -61,8 +59,9 @@ int amdgpu_umc_ras_late_init(struct amdgpu_device *adev)
 	}
 
 	/* ras init of specific umc version */
-	if (adev->umc.funcs && adev->umc.funcs->err_cnt_init)
-		adev->umc.funcs->err_cnt_init(adev);
+	if (adev->umc.ras_funcs &&
+	    adev->umc.ras_funcs->err_cnt_init)
+		adev->umc.ras_funcs->err_cnt_init(adev);
 
 	return 0;
 
@@ -94,45 +93,50 @@ int amdgpu_umc_process_ras_data_cb(struct amdgpu_device *adev,
 		struct amdgpu_iv_entry *entry)
 {
 	struct ras_err_data *err_data = (struct ras_err_data *)ras_error_status;
-
-	/* When “Full RAS” is enabled, the per-IP interrupt sources should
-	 * be disabled and the driver should only look for the aggregated
-	 * interrupt via sync flood
-	 */
-	if (amdgpu_ras_is_supported(adev, AMDGPU_RAS_BLOCK__GFX))
-		return AMDGPU_RAS_SUCCESS;
+	struct amdgpu_ras *con = amdgpu_ras_get_context(adev);
 
 	kgd2kfd_set_sram_ecc_flag(adev->kfd.dev);
-	if (adev->umc.funcs &&
-	    adev->umc.funcs->query_ras_error_count)
-	    adev->umc.funcs->query_ras_error_count(adev, ras_error_status);
+	if (adev->umc.ras_funcs &&
+	    adev->umc.ras_funcs->query_ras_error_count)
+	    adev->umc.ras_funcs->query_ras_error_count(adev, ras_error_status);
 
-	if (adev->umc.funcs &&
-	    adev->umc.funcs->query_ras_error_address &&
+	if (adev->umc.ras_funcs &&
+	    adev->umc.ras_funcs->query_ras_error_address &&
 	    adev->umc.max_ras_err_cnt_per_query) {
 		err_data->err_addr =
 			kcalloc(adev->umc.max_ras_err_cnt_per_query,
 				sizeof(struct eeprom_table_record), GFP_KERNEL);
+
 		/* still call query_ras_error_address to clear error status
 		 * even NOMEM error is encountered
 		 */
 		if(!err_data->err_addr)
-			DRM_WARN("Failed to alloc memory for umc error address record!\n");
+			dev_warn(adev->dev, "Failed to alloc memory for "
+					"umc error address record!\n");
 
 		/* umc query_ras_error_address is also responsible for clearing
 		 * error status
 		 */
-		adev->umc.funcs->query_ras_error_address(adev, ras_error_status);
+		adev->umc.ras_funcs->query_ras_error_address(adev, ras_error_status);
 	}
 
 	/* only uncorrectable error needs gpu reset */
 	if (err_data->ue_count) {
-		if (err_data->err_addr_cnt &&
-		    amdgpu_ras_add_bad_pages(adev, err_data->err_addr,
-						err_data->err_addr_cnt))
-			DRM_WARN("Failed to add ras bad page!\n");
+		dev_info(adev->dev, "%ld uncorrectable hardware errors "
+				"detected in UMC block\n",
+				err_data->ue_count);
 
-		amdgpu_ras_reset_gpu(adev, 0);
+		if ((amdgpu_bad_page_threshold != 0) &&
+			err_data->err_addr_cnt) {
+			amdgpu_ras_add_bad_pages(adev, err_data->err_addr,
+						err_data->err_addr_cnt);
+			amdgpu_ras_save_bad_pages(adev);
+
+			if (adev->smu.ppt_funcs && adev->smu.ppt_funcs->send_hbm_bad_pages_num)
+				adev->smu.ppt_funcs->send_hbm_bad_pages_num(&adev->smu, con->eeprom_control.ras_num_recs);
+		}
+
+		amdgpu_ras_reset_gpu(adev);
 	}
 
 	kfree(err_data->err_addr);

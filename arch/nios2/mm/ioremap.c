@@ -86,11 +86,15 @@ static int remap_area_pages(unsigned long address, unsigned long phys_addr,
 	if (address >= end)
 		BUG();
 	do {
+		p4d_t *p4d;
 		pud_t *pud;
 		pmd_t *pmd;
 
 		error = -ENOMEM;
-		pud = pud_alloc(&init_mm, dir, address);
+		p4d = p4d_alloc(&init_mm, dir, address);
+		if (!p4d)
+			break;
+		pud = pud_alloc(&init_mm, p4d, address);
 		if (!pud)
 			break;
 		pmd = pmd_alloc(&init_mm, pud, address);
@@ -137,6 +141,14 @@ void __iomem *ioremap(unsigned long phys_addr, unsigned long size)
 			if (!PageReserved(page))
 				return NULL;
 	}
+
+	/*
+	 * Map uncached objects in the low part of address space to
+	 * CONFIG_NIOS2_IO_REGION_BASE
+	 */
+	if (IS_MAPPABLE_UNCACHEABLE(phys_addr) &&
+	    IS_MAPPABLE_UNCACHEABLE(last_addr))
+		return (void __iomem *)(CONFIG_NIOS2_IO_REGION_BASE + phys_addr);
 
 	/* Mappings have to be page-aligned */
 	offset = phys_addr & ~PAGE_MASK;

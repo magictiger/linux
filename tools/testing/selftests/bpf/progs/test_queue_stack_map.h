@@ -6,9 +6,7 @@
 #include <linux/if_ether.h>
 #include <linux/ip.h>
 #include <linux/pkt_cls.h>
-#include "bpf_helpers.h"
-
-int _version SEC("version") = 1;
+#include <bpf/bpf_helpers.h>
 
 struct {
 	__uint(type, MAP_TYPE);

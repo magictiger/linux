@@ -8,7 +8,7 @@
 #include "../../util/event.h"
 #include "../../util/hist.h"
 #include "../../util/map.h"
-#include "../../util/map_groups.h"
+#include "../../util/maps.h"
 #include "../../util/symbol.h"
 #include "../../util/sort.h"
 #include "../../util/evsel.h"
@@ -885,7 +885,7 @@ size_t hists__fprintf(struct hists *hists, bool show_header, int max_rows,
 		}
 
 		if (h->ms.map == NULL && verbose > 1) {
-			map_groups__fprintf(h->thread->mg, fp);
+			maps__fprintf(h->thread->maps, fp);
 			fprintf(fp, "%.10s end\n", graph_dotted_line);
 		}
 	}
@@ -897,10 +897,12 @@ out:
 	return ret;
 }
 
-size_t events_stats__fprintf(struct events_stats *stats, FILE *fp)
+size_t events_stats__fprintf(struct events_stats *stats, FILE *fp,
+			     bool skip_empty)
 {
 	int i;
 	size_t ret = 0;
+	u32 total = stats->nr_events[0];
 
 	for (i = 0; i < PERF_RECORD_HEADER_MAX; ++i) {
 		const char *name;
@@ -908,8 +910,17 @@ size_t events_stats__fprintf(struct events_stats *stats, FILE *fp)
 		name = perf_event__name(i);
 		if (!strcmp(name, "UNKNOWN"))
 			continue;
+		if (skip_empty && !stats->nr_events[i])
+			continue;
 
-		ret += fprintf(fp, "%16s events: %10d\n", name, stats->nr_events[i]);
+		if (i && total) {
+			ret += fprintf(fp, "%16s events: %10d  (%4.1f%%)\n",
+				       name, stats->nr_events[i],
+				       100.0 * stats->nr_events[i] / total);
+		} else {
+			ret += fprintf(fp, "%16s events: %10d\n",
+				       name, stats->nr_events[i]);
+		}
 	}
 
 	return ret;

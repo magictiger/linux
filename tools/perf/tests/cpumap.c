@@ -75,7 +75,7 @@ static int process_event_cpus(struct perf_tool *tool __maybe_unused,
 }
 
 
-int test__cpu_map_synthesize(struct test *test __maybe_unused, int subtest __maybe_unused)
+static int test__cpu_map_synthesize(struct test_suite *test __maybe_unused, int subtest __maybe_unused)
 {
 	struct perf_cpu_map *cpus;
 
@@ -106,10 +106,12 @@ static int cpu_map_print(const char *str)
 		return -1;
 
 	cpu_map__snprint(map, buf, sizeof(buf));
+	perf_cpu_map__put(map);
+
 	return !strcmp(buf, str);
 }
 
-int test__cpu_map_print(struct test *test __maybe_unused, int subtest __maybe_unused)
+static int test__cpu_map_print(struct test_suite *test __maybe_unused, int subtest __maybe_unused)
 {
 	TEST_ASSERT_VAL("failed to convert map", cpu_map_print("1"));
 	TEST_ASSERT_VAL("failed to convert map", cpu_map_print("1,5"));
@@ -120,3 +122,22 @@ int test__cpu_map_print(struct test *test __maybe_unused, int subtest __maybe_un
 	TEST_ASSERT_VAL("failed to convert map", cpu_map_print("1-10,12-20,22-30,32-40"));
 	return 0;
 }
+
+static int test__cpu_map_merge(struct test_suite *test __maybe_unused, int subtest __maybe_unused)
+{
+	struct perf_cpu_map *a = perf_cpu_map__new("4,2,1");
+	struct perf_cpu_map *b = perf_cpu_map__new("4,5,7");
+	struct perf_cpu_map *c = perf_cpu_map__merge(a, b);
+	char buf[100];
+
+	TEST_ASSERT_VAL("failed to merge map: bad nr", c->nr == 5);
+	cpu_map__snprint(c, buf, sizeof(buf));
+	TEST_ASSERT_VAL("failed to merge map: bad result", !strcmp(buf, "1-2,4-5,7"));
+	perf_cpu_map__put(b);
+	perf_cpu_map__put(c);
+	return 0;
+}
+
+DEFINE_SUITE("Synthesize cpu map", cpu_map_synthesize);
+DEFINE_SUITE("Print cpu map", cpu_map_print);
+DEFINE_SUITE("Merge cpu map", cpu_map_merge);

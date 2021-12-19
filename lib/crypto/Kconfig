@@ -90,7 +90,7 @@ config CRYPTO_LIB_DES
 config CRYPTO_LIB_POLY1305_RSIZE
 	int
 	default 2 if MIPS
-	default 4 if X86_64
+	default 11 if X86_64
 	default 9 if ARM || ARM64
 	default 1
 
@@ -127,4 +127,7 @@ config CRYPTO_LIB_CHACHA20POLY1305
 	select CRYPTO_LIB_POLY1305
 
 config CRYPTO_LIB_SHA256
+	tristate
+
+config CRYPTO_LIB_SM4
 	tristate

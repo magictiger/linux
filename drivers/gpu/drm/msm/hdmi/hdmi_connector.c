@@ -101,7 +101,7 @@ static int gpio_config(struct hdmi *hdmi, bool on)
 
 				gpiod_set_value_cansleep(gpio.gpiod, value);
 			}
-		};
+		}
 
 		DBG("gpio off");
 	}
@@ -146,16 +146,13 @@ int msm_hdmi_hpd_enable(struct drm_connector *connector)
 	const struct hdmi_platform_config *config = hdmi->config;
 	struct device *dev = &hdmi->pdev->dev;
 	uint32_t hpd_ctrl;
-	int i, ret;
+	int ret;
 	unsigned long flags;
 
-	for (i = 0; i < config->hpd_reg_cnt; i++) {
-		ret = regulator_enable(hdmi->hpd_regs[i]);
-		if (ret) {
-			DRM_DEV_ERROR(dev, "failed to enable hpd regulator: %s (%d)\n",
-					config->hpd_reg_names[i], ret);
-			goto fail;
-		}
+	ret = regulator_bulk_enable(config->hpd_reg_cnt, hdmi->hpd_regs);
+	if (ret) {
+		DRM_DEV_ERROR(dev, "failed to enable hpd regulators: %d\n", ret);
+		goto fail;
 	}
 
 	ret = pinctrl_pm_select_default_state(dev);
@@ -207,7 +204,7 @@ static void hdp_disable(struct hdmi_connector *hdmi_connector)
 	struct hdmi *hdmi = hdmi_connector->hdmi;
 	const struct hdmi_platform_config *config = hdmi->config;
 	struct device *dev = &hdmi->pdev->dev;
-	int i, ret = 0;
+	int ret;
 
 	/* Disable HPD interrupt */
 	hdmi_write(hdmi, REG_HDMI_HPD_INT_CTRL, 0);
@@ -225,12 +222,9 @@ static void hdp_disable(struct hdmi_connector *hdmi_connector)
 	if (ret)
 		dev_warn(dev, "pinctrl state chg failed: %d\n", ret);
 
-	for (i = 0; i < config->hpd_reg_cnt; i++) {
-		ret = regulator_disable(hdmi->hpd_regs[i]);
-		if (ret)
-			dev_warn(dev, "failed to disable hpd regulator: %s (%d)\n",
-					config->hpd_reg_names[i], ret);
-	}
+	ret = regulator_bulk_disable(config->hpd_reg_cnt, hdmi->hpd_regs);
+	if (ret)
+		dev_warn(dev, "failed to disable hpd regulator: %d\n", ret);
 }
 
 static void
@@ -433,8 +427,10 @@ struct drm_connector *msm_hdmi_connector_init(struct hdmi *hdmi)
 
 	connector = &hdmi_connector->base;
 
-	drm_connector_init(hdmi->dev, connector, &hdmi_connector_funcs,
-			DRM_MODE_CONNECTOR_HDMIA);
+	drm_connector_init_with_ddc(hdmi->dev, connector,
+				    &hdmi_connector_funcs,
+				    DRM_MODE_CONNECTOR_HDMIA,
+				    hdmi->i2c);
 	drm_connector_helper_add(connector, &msm_hdmi_connector_helper_funcs);
 
 	connector->polled = DRM_CONNECTOR_POLL_CONNECT |

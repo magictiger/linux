@@ -20,7 +20,7 @@
 #include "psb_intel_drv.h"
 #include "psb_intel_reg.h"
 
-/**
+/*
  * Returns whether any output on the specified pipe is of the specified type
  */
 bool gma_pipe_has_type(struct drm_crtc *crtc, int type)
@@ -51,7 +51,7 @@ int gma_pipe_set_base(struct drm_crtc *crtc, int x, int y,
 		      struct drm_framebuffer *old_fb)
 {
 	struct drm_device *dev = crtc->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct gma_crtc *gma_crtc = to_gma_crtc(crtc);
 	struct drm_framebuffer *fb = crtc->primary->fb;
 	struct gtt_range *gtt;
@@ -136,7 +136,7 @@ gma_pipe_set_base_exit:
 void gma_crtc_load_lut(struct drm_crtc *crtc)
 {
 	struct drm_device *dev = crtc->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct gma_crtc *gma_crtc = to_gma_crtc(crtc);
 	const struct psb_offset *map = &dev_priv->regmap[gma_crtc->pipe];
 	int palreg = map->palette;
@@ -180,7 +180,7 @@ int gma_crtc_gamma_set(struct drm_crtc *crtc, u16 *red, u16 *green, u16 *blue,
 	return 0;
 }
 
-/**
+/*
  * Sets the power management mode of the pipe and plane.
  *
  * This code should probably grow support for turning the cursor off and back
@@ -189,7 +189,7 @@ int gma_crtc_gamma_set(struct drm_crtc *crtc, u16 *red, u16 *green, u16 *blue,
 void gma_crtc_dpms(struct drm_crtc *crtc, int mode)
 {
 	struct drm_device *dev = crtc->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct gma_crtc *gma_crtc = to_gma_crtc(crtc);
 	int pipe = gma_crtc->pipe;
 	const struct psb_offset *map = &dev_priv->regmap[pipe];
@@ -255,6 +255,8 @@ void gma_crtc_dpms(struct drm_crtc *crtc, int mode)
 		/* Give the overlay scaler a chance to enable
 		 * if it's on this pipe */
 		/* psb_intel_crtc_dpms_video(crtc, true); TODO */
+
+		drm_crtc_vblank_on(crtc);
 		break;
 	case DRM_MODE_DPMS_OFF:
 		if (!gma_crtc->active)
@@ -322,7 +324,7 @@ int gma_crtc_cursor_set(struct drm_crtc *crtc,
 			uint32_t width, uint32_t height)
 {
 	struct drm_device *dev = crtc->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct gma_crtc *gma_crtc = to_gma_crtc(crtc);
 	int pipe = gma_crtc->pipe;
 	uint32_t control = (pipe == 0) ? CURACNTR : CURBCNTR;
@@ -349,7 +351,7 @@ int gma_crtc_cursor_set(struct drm_crtc *crtc,
 			gt = container_of(gma_crtc->cursor_obj,
 					  struct gtt_range, gem);
 			psb_gtt_unpin(gt);
-			drm_gem_object_put_unlocked(gma_crtc->cursor_obj);
+			drm_gem_object_put(gma_crtc->cursor_obj);
 			gma_crtc->cursor_obj = NULL;
 		}
 		return 0;
@@ -425,7 +427,7 @@ int gma_crtc_cursor_set(struct drm_crtc *crtc,
 	if (gma_crtc->cursor_obj) {
 		gt = container_of(gma_crtc->cursor_obj, struct gtt_range, gem);
 		psb_gtt_unpin(gt);
-		drm_gem_object_put_unlocked(gma_crtc->cursor_obj);
+		drm_gem_object_put(gma_crtc->cursor_obj);
 	}
 
 	gma_crtc->cursor_obj = obj;
@@ -433,7 +435,7 @@ unlock:
 	return ret;
 
 unref_cursor:
-	drm_gem_object_put_unlocked(obj);
+	drm_gem_object_put(obj);
 	return ret;
 }
 
@@ -501,30 +503,76 @@ void gma_crtc_destroy(struct drm_crtc *crtc)
 	kfree(gma_crtc);
 }
 
+int gma_crtc_page_flip(struct drm_crtc *crtc,
+		       struct drm_framebuffer *fb,
+		       struct drm_pending_vblank_event *event,
+		       uint32_t page_flip_flags,
+		       struct drm_modeset_acquire_ctx *ctx)
+{
+	struct gma_crtc *gma_crtc = to_gma_crtc(crtc);
+	struct drm_framebuffer *current_fb = crtc->primary->fb;
+	struct drm_framebuffer *old_fb = crtc->primary->old_fb;
+	const struct drm_crtc_helper_funcs *crtc_funcs = crtc->helper_private;
+	struct drm_device *dev = crtc->dev;
+	unsigned long flags;
+	int ret;
+
+	if (!crtc_funcs->mode_set_base)
+		return -EINVAL;
+
+	/* Using mode_set_base requires the new fb to be set already. */
+	crtc->primary->fb = fb;
+
+	if (event) {
+		spin_lock_irqsave(&dev->event_lock, flags);
+
+		WARN_ON(drm_crtc_vblank_get(crtc) != 0);
+
+		gma_crtc->page_flip_event = event;
+
+		/* Call this locked if we want an event at vblank interrupt. */
+		ret = crtc_funcs->mode_set_base(crtc, crtc->x, crtc->y, old_fb);
+		if (ret) {
+			gma_crtc->page_flip_event = NULL;
+			drm_crtc_vblank_put(crtc);
+		}
+
+		spin_unlock_irqrestore(&dev->event_lock, flags);
+	} else {
+		ret = crtc_funcs->mode_set_base(crtc, crtc->x, crtc->y, old_fb);
+	}
+
+	/* Restore previous fb in case of failure. */
+	if (ret)
+		crtc->primary->fb = current_fb;
+
+	return ret;
+}
+
 int gma_crtc_set_config(struct drm_mode_set *set,
 			struct drm_modeset_acquire_ctx *ctx)
 {
 	struct drm_device *dev = set->crtc->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	int ret;
 
 	if (!dev_priv->rpm_enabled)
 		return drm_crtc_helper_set_config(set, ctx);
 
-	pm_runtime_forbid(&dev->pdev->dev);
+	pm_runtime_forbid(dev->dev);
 	ret = drm_crtc_helper_set_config(set, ctx);
-	pm_runtime_allow(&dev->pdev->dev);
+	pm_runtime_allow(dev->dev);
 
 	return ret;
 }
 
-/**
+/*
  * Save HW states of given crtc
  */
 void gma_crtc_save(struct drm_crtc *crtc)
 {
 	struct drm_device *dev = crtc->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct gma_crtc *gma_crtc = to_gma_crtc(crtc);
 	struct psb_intel_crtc_state *crtc_state = gma_crtc->crtc_state;
 	const struct psb_offset *map = &dev_priv->regmap[gma_crtc->pipe];
@@ -561,13 +609,13 @@ void gma_crtc_save(struct drm_crtc *crtc)
 		crtc_state->savePalette[i] = REG_READ(palette_reg + (i << 2));
 }
 
-/**
+/*
  * Restore HW states of given crtc
  */
 void gma_crtc_restore(struct drm_crtc *crtc)
 {
 	struct drm_device *dev = crtc->dev;
-	struct drm_psb_private *dev_priv = dev->dev_private;
+	struct drm_psb_private *dev_priv = to_drm_psb_private(dev);
 	struct gma_crtc *gma_crtc =  to_gma_crtc(crtc);
 	struct psb_intel_crtc_state *crtc_state = gma_crtc->crtc_state;
 	const struct psb_offset *map = &dev_priv->regmap[gma_crtc->pipe];
